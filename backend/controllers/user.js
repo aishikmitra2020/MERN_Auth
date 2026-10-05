@@ -4,7 +4,7 @@ import { redisClient } from '../index.js'
 import sanitize from "mongo-sanitize"; // preventing NoSQL Injection attack
 import { User } from "../models/User.js";
 import bcrypt from 'bcrypt'
-import crypto from 'crypto'
+import crypto, { verify } from 'crypto'
 import sendMail from "../config/sendMail.js";
 import { getVerifyEmailHtml } from '../config/html.js'
 
@@ -75,3 +75,47 @@ export const registerUser = TryCatch(async(req, res) => {
         message: `Verification link has been sent to ${email}, it will expire in 5 mins`
     });
 });
+
+export const verifyUser = TryCatch(async (req, res) => {
+    const { token } = req.params;
+
+    if (!token ) {
+        return res.status(400).json({
+            message: "Verification token is required",
+        });
+    }
+
+    const verifyKey = `verify:${token}`;
+
+    const userDataJson = await redisClient.get(verifyKey);
+
+    if (!userDataJson) {
+        return res.status(400).json({
+            message: "Verification link is expired",
+        });
+    }
+    
+    await redisClient.del(verifyKey);
+
+    const userData = JSON.parse(userDataJson);
+
+    const existingUser = await User.findOne({ email: userData.email });
+
+    if (existingUser) {
+        return res.status(400).json({
+            message: "User already exists",
+        });
+    }
+
+    const newUser = await User.create({
+        name: userData.name,
+        email: userData.email,
+        password: userData.password
+    });
+
+    res.status(201).json({
+        message: "Email verified successfully! ypur account has been created",
+        user: {_id: newUser._id, name: newUser.name, email: newUser.email}
+    });
+})
+
